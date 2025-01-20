@@ -18,6 +18,7 @@ Description:
 import rclpy  # ROS2 Python library
 from rclpy.node import Node
 from ros_robot_controller_msgs.msg import MotorsState, MotorState
+from sensor_msgs.msg import LaserScan
 import math
 import time
 from mecanum import MecanumChassis  # Import the MecanumChassis class
@@ -33,6 +34,22 @@ class OmniWheelControlNode(Node):
         self.motor_pub = self.create_publisher(
             MotorsState, '/ros_robot_controller/set_motor', 10
         )
+         # Subscriber for LiDAR data
+        self.lidar_sub = self.create_subscription(
+            LaserScan,
+            '/scan_raw',  # Replace with your LiDAR topic
+            self.lidar_callback,
+            10
+        )
+
+        self.front_distance = float('inf')
+        self.back_distance = float('inf')
+        self.left_distance = float('inf')
+        self.right_distance = float('inf')
+
+        self.critical_distance = 0.1  # Set critical distance to 10 cm
+        self.get_logger().info('Omni-Wheel Control Node with LiDAR initialized.')
+
         self.get_logger().info('Omni-Wheel Control Node initialized and ready for commands.')
 
     def publish_motor_command(self, motor_states):
@@ -153,7 +170,43 @@ class OmniWheelControlNode(Node):
         ]
         self.move_with_duration(motor_states, duration)
         self.get_logger().info(f'Rotating left (CCW) at {angular_speed:.2f} RPS for {duration:.2f} seconds.')
+    def lidar_callback(self, msg):
+        """
+        Callback function to process LiDAR data and determine distances in all directions.
+        :param msg: LaserScan message
+        """
+        ranges = msg.ranges
+        angle_min = msg.angle_min
+        angle_increment = msg.angle_increment
+        num_readings = len(ranges)
 
+        # Define indices for different directions
+        front_index = int(num_readings / 2)
+        back_index = 0
+        left_index = int(num_readings * 3 / 4)
+        right_index = int(num_readings / 4)
+
+        # Extract distances for front, back, left, and right
+        self.front_distance = ranges[front_index]
+        self.back_distance = ranges[back_index]
+        self.left_distance = ranges[left_index]
+        self.right_distance = ranges[right_index]
+
+    def is_obstacle_near(self, direction):
+        """
+        Check if an obstacle is within the critical distance in a specific direction.
+        :param direction: 'front', 'back', 'left', or 'right'
+        :return: Boolean indicating if an obstacle is near
+        """
+        if direction == 'front':
+            return self.front_distance < self.critical_distance
+        elif direction == 'back':
+            return self.back_distance < self.critical_distance
+        elif direction == 'left':
+            return self.left_distance < self.critical_distance
+        elif direction == 'right':
+            return self.right_distance < self.critical_distance
+        return False
     def rotate_right(self, angular_speed, duration):
         """
         Rotates the robot right (clockwise) by applying opposite motor speeds.
